@@ -8,7 +8,7 @@ info:
     risk threshold explanations, and business rules by natural language
     query rather than relying on hardcoded system prompt context.
 servers:
-  - url: https://margot-unhesitative-mee.ngrok-free.dev
+  - url: https://beijing-everyday-unlimited-correct.trycloudflare.com
 paths:
   /search_knowledge:
     get:

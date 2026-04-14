@@ -11,7 +11,7 @@ info:
     an allocation could not be satisfied or whether the model was
     infeasible.
 servers:
-  - url: https://margot-unhesitative-mee.ngrok-free.dev
+  - url: https://beijing-everyday-unlimited-correct.trycloudflare.com
 paths:
   /get_iis_report:
     get:
