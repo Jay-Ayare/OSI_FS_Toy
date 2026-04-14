@@ -1,0 +1,65 @@
+openapi: "3.0.0"
+info:
+  title: Search Knowledge Base
+  version: "1.0.0"
+  description: >
+    Searches the ChromaDB vector knowledge base for relevant domain
+    knowledge chunks. Use this to retrieve constraint definitions,
+    risk threshold explanations, and business rules by natural language
+    query rather than relying on hardcoded system prompt context.
+servers:
+  - url: https://margot-unhesitative-mee.ngrok-free.dev
+paths:
+  /search_knowledge:
+    get:
+      operationId: search_knowledge
+      summary: Retrieve relevant knowledge chunks by semantic query
+      description: >
+        Performs a semantic search over the scheduling domain knowledge base
+        (constraint glossary, risk thresholds, business rules) and returns
+        the top matching document chunks. Call this when you need to explain
+        what a constraint means, what a risk level implies, or how the
+        scheduler makes decisions.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Natural language question or topic to search for
+        - name: n_results
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 3
+          description: Number of results to return (default 3)
+      responses:
+        "200":
+          description: Matching knowledge chunks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  query:
+                    type: string
+                  n_results:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        title:
+                          type: string
+                        type:
+                          type: string
+                        content:
+                          type: string
+                        distance:
+                          type: number
+        "400":
+          description: Missing query parameter

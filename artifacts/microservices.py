@@ -24,6 +24,7 @@ Test quickly with:
 import os
 import json
 from flask import Flask, request, jsonify
+from knowledge_base import search_knowledge
 
 app = Flask(__name__)
 
@@ -319,6 +320,27 @@ def get_allocation_trace():
             "makespan":        artifact.get("objective_value"),
         },
     })
+
+
+# ─────────────────────────────────────────────────────────────────
+# TOOL 6 — search_knowledge
+# ─────────────────────────────────────────────────────────────────
+
+@app.route("/search_knowledge", methods=["GET"])
+def search_knowledge_endpoint():
+    """
+    Searches the ChromaDB knowledge base with a natural language query.
+    Returns the top matching constraint glossary, risk threshold,
+    or business rule chunks.
+    """
+    query     = request.args.get("query")
+    n_results = int(request.args.get("n_results", 3))
+
+    if not query:
+        return jsonify({"error": "missing_parameter", "message": "'query' is required."}), 400
+
+    results = search_knowledge(query, n_results=n_results)
+    return jsonify({"query": query, "n_results": n_results, "results": results})
 
 
 # ─────────────────────────────────────────────────────────────────
