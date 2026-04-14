@@ -1,0 +1,86 @@
+# =============================================================
+# FILE: tools/get_risk_score.yaml
+# =============================================================
+openapi: "3.0.0"
+info:
+  title: Get Risk Score
+  version: "1.0.0"
+  description: >
+    Returns computed risk scores for job assignments in a run.
+    Risk is calculated from number of qualified backup workers,
+    hours already worked, machine availability, and precedence
+    tightness. This is a deterministic computation — not LLM-generated.
+    Call this when the user asks whether an allocation looks risky.
+servers:
+  - url: https://margot-unhesitative-mee.ngrok-free.dev
+paths:
+  /get_risk_score:
+    get:
+      operationId: get_risk_score
+      summary: Fetch risk scores for job assignments
+      description: Returns computed risk scores for job assignments in a run, based on backup worker count, hours worked, machine availability, and precedence tightness. Call this when the user asks whether an allocation looks risky.
+      parameters:
+        - name: run_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: task_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Specific job ID (J1–J5). If omitted, returns risk
+            for all jobs in the run.
+        - name: person_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Filter results to jobs assigned to this worker ID (W1–W3).
+      responses:
+        "200":
+          description: Risk score result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  date:
+                    type: string
+                  risks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        job_id:
+                          type: string
+                        job_name:
+                          type: string
+                        assigned_machine:
+                          type: string
+                        assigned_worker:
+                          type: string
+                        risk_level:
+                          type: string
+                          enum: [low, medium, high, critical]
+                        risk_score:
+                          type: integer
+                        contributing_factors:
+                          type: array
+                          items:
+                            type: string
+                        qualified_backup_count:
+                          type: integer
+                  summary:
+                    type: object

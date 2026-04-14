@@ -1,0 +1,84 @@
+# =============================================================
+# FILE: tools/get_allocation_trace.yaml
+# =============================================================
+openapi: "3.0.0"
+info:
+  title: Get Allocation Trace
+  version: "1.0.0"
+  description: >
+    Returns the full allocation decision trace for a run, showing
+    which machine each job was assigned to, when it starts and ends,
+    which worker was assigned, and which machines were considered
+    as alternatives. Call this when the user asks why a specific
+    assignment was made or asks to walk through a scheduling decision.
+servers:
+  - url: https://margot-unhesitative-mee.ngrok-free.dev
+paths:
+  /get_allocation_trace:
+    get:
+      operationId: get_allocation_trace
+      summary: Fetch allocation decision trace
+      description: Returns the full allocation decision trace for a run, showing which machine each job was assigned to, when it starts and ends, which worker was assigned, and which machines were considered as alternatives.
+      parameters:
+        - name: run_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: task_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Specific job ID (J1–J5). If omitted, returns trace
+            for all jobs in the run.
+      responses:
+        "200":
+          description: Allocation trace result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  date:
+                    type: string
+                  traces:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        job_id:
+                          type: string
+                        job_name:
+                          type: string
+                        required_skill:
+                          type: string
+                        assigned_machine:
+                          type: string
+                        assigned_worker:
+                          type: string
+                        start:
+                          type: integer
+                        end:
+                          type: integer
+                        is_present:
+                          type: boolean
+                        alternatives_considered:
+                          type: array
+                          items:
+                            type: object
+                  unassigned_jobs:
+                    type: array
+                    items:
+                      type: string
+                  summary:
+                    type: object

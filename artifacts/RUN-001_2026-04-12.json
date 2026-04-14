@@ -1,0 +1,293 @@
+{
+  "run_id": "RUN-001",
+  "date": "2026-04-12",
+  "solve_status": "optimal",
+  "objective_value": 80,
+  "conflict_set": [],
+  "availability_snapshot": {
+    "machines": [
+      {
+        "id": "M1",
+        "name": "Machine 1",
+        "available": true,
+        "unavailability_reason": null
+      },
+      {
+        "id": "M2",
+        "name": "Machine 2",
+        "available": true,
+        "unavailability_reason": null
+      },
+      {
+        "id": "M3",
+        "name": "Machine 3",
+        "available": false,
+        "unavailability_reason": "Scheduled maintenance"
+      }
+    ],
+    "workers": [
+      {
+        "id": "W1",
+        "name": "Worker 1",
+        "skills": [
+          "welding",
+          "assembly"
+        ],
+        "max_hours": 8,
+        "hours_already_worked": 6,
+        "hours_remaining": 2
+      },
+      {
+        "id": "W2",
+        "name": "Worker 2",
+        "skills": [
+          "painting",
+          "assembly"
+        ],
+        "max_hours": 8,
+        "hours_already_worked": 2,
+        "hours_remaining": 6
+      },
+      {
+        "id": "W3",
+        "name": "Worker 3",
+        "skills": [
+          "welding",
+          "painting"
+        ],
+        "max_hours": 8,
+        "hours_already_worked": 0,
+        "hours_remaining": 8
+      }
+    ]
+  },
+  "constraint_analysis": [
+    {
+      "constraint_id": "C1",
+      "machine": "M1",
+      "jobs_in_order": [
+        "J1",
+        "J3"
+      ],
+      "gaps_between_jobs": [
+        0
+      ],
+      "is_tight": true,
+      "description": "No two jobs may run on the same machine at the same time"
+    },
+    {
+      "constraint_id": "C1",
+      "machine": "M2",
+      "jobs_in_order": [
+        "J2",
+        "J4",
+        "J5"
+      ],
+      "gaps_between_jobs": [
+        0,
+        0
+      ],
+      "is_tight": true,
+      "description": "No two jobs may run on the same machine at the same time"
+    },
+    {
+      "constraint_id": "C2",
+      "predecessor": "J1",
+      "successor": "J3",
+      "gap": 0,
+      "is_tight": true,
+      "description": "Job 3 cannot start until Job 1 has finished"
+    },
+    {
+      "constraint_id": "C3",
+      "predecessor": "J2",
+      "successor": "J5",
+      "gap": 35,
+      "is_tight": false,
+      "description": "Job 5 cannot start until Job 2 has finished"
+    },
+    {
+      "constraint_id": "C4",
+      "machine": "M3",
+      "is_tight": true,
+      "gap": null,
+      "description": "Machine 3 is unavailable due to scheduled maintenance"
+    },
+    {
+      "constraint_id": "C5",
+      "worker": "W1",
+      "hours_remaining": 2,
+      "hours_assigned": 0,
+      "is_tight": true,
+      "description": "Worker 1 has only 2 hours remaining today"
+    }
+  ],
+  "risk_analysis": [
+    {
+      "job_id": "J1",
+      "job_name": "Job 1",
+      "assigned_machine": "M1",
+      "assigned_worker": "W3",
+      "risk_level": "medium",
+      "risk_score": 1,
+      "contributing_factors": [
+        "Precedence constraint is tight \u2014 no buffer"
+      ],
+      "qualified_backup_count": 1
+    },
+    {
+      "job_id": "J2",
+      "job_name": "Job 2",
+      "assigned_machine": "M2",
+      "assigned_worker": "W3",
+      "risk_level": "low",
+      "risk_score": 0,
+      "contributing_factors": [],
+      "qualified_backup_count": 1
+    },
+    {
+      "job_id": "J3",
+      "job_name": "Job 3",
+      "assigned_machine": "M1",
+      "assigned_worker": "W2",
+      "risk_level": "medium",
+      "risk_score": 1,
+      "contributing_factors": [
+        "Precedence constraint is tight \u2014 no buffer"
+      ],
+      "qualified_backup_count": 1
+    },
+    {
+      "job_id": "J4",
+      "job_name": "Job 4",
+      "assigned_machine": "M2",
+      "assigned_worker": "W3",
+      "risk_level": "low",
+      "risk_score": 0,
+      "contributing_factors": [],
+      "qualified_backup_count": 1
+    },
+    {
+      "job_id": "J5",
+      "job_name": "Job 5",
+      "assigned_machine": "M2",
+      "assigned_worker": "W3",
+      "risk_level": "low",
+      "risk_score": 0,
+      "contributing_factors": [],
+      "qualified_backup_count": 1
+    }
+  ],
+  "allocation_trace": [
+    {
+      "job_id": "J1",
+      "job_name": "Job 1",
+      "required_skill": "welding",
+      "assigned_machine": "M1",
+      "assigned_worker": "W3",
+      "start": 0,
+      "end": 30,
+      "is_present": true,
+      "alternatives_considered": [
+        {
+          "machine": "M1",
+          "duration": 30,
+          "selected": true
+        },
+        {
+          "machine": "M2",
+          "duration": 40,
+          "selected": false
+        }
+      ]
+    },
+    {
+      "job_id": "J2",
+      "job_name": "Job 2",
+      "required_skill": "painting",
+      "assigned_machine": "M2",
+      "assigned_worker": "W3",
+      "start": 0,
+      "end": 25,
+      "is_present": true,
+      "alternatives_considered": [
+        {
+          "machine": "M1",
+          "duration": 20,
+          "selected": false
+        },
+        {
+          "machine": "M2",
+          "duration": 25,
+          "selected": true
+        }
+      ]
+    },
+    {
+      "job_id": "J3",
+      "job_name": "Job 3",
+      "required_skill": "assembly",
+      "assigned_machine": "M1",
+      "assigned_worker": "W2",
+      "start": 30,
+      "end": 80,
+      "is_present": true,
+      "alternatives_considered": [
+        {
+          "machine": "M1",
+          "duration": 50,
+          "selected": true
+        },
+        {
+          "machine": "M2",
+          "duration": 60,
+          "selected": false
+        }
+      ]
+    },
+    {
+      "job_id": "J4",
+      "job_name": "Job 4",
+      "required_skill": "welding",
+      "assigned_machine": "M2",
+      "assigned_worker": "W3",
+      "start": 25,
+      "end": 60,
+      "is_present": true,
+      "alternatives_considered": [
+        {
+          "machine": "M1",
+          "duration": 45,
+          "selected": false
+        },
+        {
+          "machine": "M2",
+          "duration": 35,
+          "selected": true
+        }
+      ]
+    },
+    {
+      "job_id": "J5",
+      "job_name": "Job 5",
+      "required_skill": "painting",
+      "assigned_machine": "M2",
+      "assigned_worker": "W3",
+      "start": 60,
+      "end": 80,
+      "is_present": true,
+      "alternatives_considered": [
+        {
+          "machine": "M1",
+          "duration": 15,
+          "selected": false
+        },
+        {
+          "machine": "M2",
+          "duration": 20,
+          "selected": true
+        }
+      ]
+    }
+  ]
+}

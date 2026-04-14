@@ -1,0 +1,60 @@
+# =============================================================
+# FILE: tools/get_iis_report.yaml
+# =============================================================
+openapi: "3.0.0"
+info:
+  title: Get IIS Report
+  version: "1.0.0"
+  description: >
+    Retrieves the conflict set (CP Optimizer equivalent of an IIS)
+    for a scheduling run. Call this first when the user asks why
+    an allocation could not be satisfied or whether the model was
+    infeasible.
+servers:
+  - url: https://margot-unhesitative-mee.ngrok-free.dev
+paths:
+  /get_iis_report:
+    get:
+      operationId: get_iis_report
+      summary: Fetch conflict set for a run and date
+      description: Retrieves the conflict set (CP Optimizer equivalent of an IIS) for a scheduling run. Call this first when the user asks why an allocation could not be satisfied or whether the model was infeasible.
+      parameters:
+        - name: run_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The solver job identifier (e.g. RUN-001)
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: The target date in ISO format (e.g. 2026-04-12)
+      responses:
+        "200":
+          description: Conflict set result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  date:
+                    type: string
+                  solve_status:
+                    type: string
+                  is_infeasible:
+                    type: boolean
+                  objective_value:
+                    type: number
+                  conflict_set:
+                    type: array
+                    items:
+                      type: string
+                  explanation_hint:
+                    type: string
+        "404":
+          description: Artifact not found for this run_id and date

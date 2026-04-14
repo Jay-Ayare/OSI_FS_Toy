@@ -1,0 +1,64 @@
+# =============================================================
+# FILE: tools/get_constraint_slack.yaml
+# =============================================================
+openapi: "3.0.0"
+info:
+  title: Get Constraint Slack
+  version: "1.0.0"
+  description: >
+    Returns constraint tightness analysis for a run and date.
+    A gap of 0 means the constraint was fully binding (CP equivalent
+    of zero slack). Use this to identify risk signals and near-binding
+    conditions. If constraint_id is omitted, returns all constraints.
+servers:
+  - url: https://margot-unhesitative-mee.ngrok-free.dev
+paths:
+  /get_constraint_slack:
+    get:
+      operationId: get_constraint_slack
+      summary: Fetch constraint tightness for a run and date
+      description: Returns constraint tightness analysis for a run and date. A gap of 0 means the constraint was fully binding. Use this to identify risk signals and near-binding conditions.
+      parameters:
+        - name: run_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: constraint_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Specific constraint ID to query (C1, C2, C3, C4, C5).
+            If omitted, returns all constraints for the run.
+      responses:
+        "200":
+          description: Constraint tightness result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  date:
+                    type: string
+                  constraints:
+                    type: array
+                    items:
+                      type: object
+                  tight_constraints:
+                    type: array
+                    items:
+                      type: object
+                  tight_count:
+                    type: integer
+                  summary:
+                    type: string

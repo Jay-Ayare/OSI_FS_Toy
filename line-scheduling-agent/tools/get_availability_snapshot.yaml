@@ -1,0 +1,71 @@
+# =============================================================
+# FILE: tools/get_availability_snapshot.yaml
+# =============================================================
+openapi: "3.0.0"
+info:
+  title: Get Availability Snapshot
+  version: "1.0.0"
+  description: >
+    Returns the exact machines and workers that were available
+    when the solver ran for a specific run and date. Call this
+    to ground any explanation about who or what was unavailable.
+servers:
+  - url: https://margot-unhesitative-mee.ngrok-free.dev
+paths:
+  /get_availability_snapshot:
+    get:
+      operationId: get_availability_snapshot
+      summary: Fetch availability records for a run and date
+      description: Returns the exact machines and workers that were available when the solver ran for a specific run and date. Call this to ground any explanation about who or what was unavailable.
+      parameters:
+        - name: run_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: resource_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [people, tools, both]
+            default: both
+          description: Filter by people, tools (machines), or both
+      responses:
+        "200":
+          description: Availability snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  date:
+                    type: string
+                  workers:
+                    type: array
+                    items:
+                      type: object
+                  machines:
+                    type: array
+                    items:
+                      type: object
+                  unavailable_machines:
+                    type: array
+                    items:
+                      type: object
+                  low_hours_workers:
+                    type: array
+                    items:
+                      type: object
+                  warning:
+                    type: string
+                  hours_warning:
+                    type: string
