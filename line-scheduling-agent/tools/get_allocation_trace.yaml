@@ -12,7 +12,7 @@ info:
     as alternatives. Call this when the user asks why a specific
     assignment was made or asks to walk through a scheduling decision.
 servers:
-  - url: https://beijing-everyday-unlimited-correct.trycloudflare.com
+  - url: https://sustained-definitely-groundwater-domain.trycloudflare.com
 paths:
   /get_allocation_trace:
     get:
