@@ -1,0 +1,75 @@
+openapi: "3.0.0"
+info:
+  title: Trace Query
+  version: "1.0.0"
+  description: >
+    Deterministic pipeline endpoint that runs the full tool chain for a
+    scheduling question and returns a structured step-by-step execution
+    trace alongside the assembled context. Use this as the primary entry
+    point for all scheduling questions — it replaces calling individual
+    tools directly.
+servers:
+  - url: https://territory-investment-accordance-hypothetical.trycloudflare.com
+paths:
+  /trace_query:
+    get:
+      operationId: trace_query
+      summary: Run full pipeline with step trace
+      description: >
+        Runs the deterministic pipeline: classify_intent → tool_chain →
+        knowledge_retrieval → context_assembly → synthesis_ready.
+        Returns the execution trace and assembled context for the agent
+        to synthesise into a final explanation.
+      parameters:
+        - name: run_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The solver run identifier (e.g. RUN-001)
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: The target date in ISO format (e.g. 2026-04-12)
+        - name: user_message
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The user's natural language question
+        - name: n_results
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 3
+          description: Number of knowledge chunks to retrieve (default 3)
+      responses:
+        "200":
+          description: Trace and assembled context
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  date:
+                    type: string
+                  user_message:
+                    type: string
+                  trace:
+                    type: array
+                    items:
+                      type: object
+                  trace_readable:
+                    type: string
+                  assembled_context:
+                    type: string
+        "400":
+          description: Missing parameters
+        "404":
+          description: Artifact not found
