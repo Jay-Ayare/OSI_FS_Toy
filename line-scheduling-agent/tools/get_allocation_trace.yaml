@@ -12,7 +12,7 @@ info:
     as alternatives. Call this when the user asks why a specific
     assignment was made or asks to walk through a scheduling decision.
 servers:
-  - url: https://territory-investment-accordance-hypothetical.trycloudflare.com
+  - url: https://entries-cigarette-wilderness-pretty.trycloudflare.com
 paths:
   /get_allocation_trace:
     get:

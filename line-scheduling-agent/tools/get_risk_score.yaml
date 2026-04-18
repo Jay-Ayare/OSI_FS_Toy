@@ -12,7 +12,7 @@ info:
     tightness. This is a deterministic computation — not LLM-generated.
     Call this when the user asks whether an allocation looks risky.
 servers:
-  - url: https://territory-investment-accordance-hypothetical.trycloudflare.com
+  - url: https://entries-cigarette-wilderness-pretty.trycloudflare.com
 paths:
   /get_risk_score:
     get:

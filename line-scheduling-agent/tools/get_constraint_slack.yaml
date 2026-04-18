@@ -11,7 +11,7 @@ info:
     of zero slack). Use this to identify risk signals and near-binding
     conditions. If constraint_id is omitted, returns all constraints.
 servers:
-  - url: https://territory-investment-accordance-hypothetical.trycloudflare.com
+  - url: https://entries-cigarette-wilderness-pretty.trycloudflare.com
 paths:
   /get_constraint_slack:
     get:

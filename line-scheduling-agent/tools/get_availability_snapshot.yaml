@@ -10,7 +10,7 @@ info:
     when the solver ran for a specific run and date. Call this
     to ground any explanation about who or what was unavailable.
 servers:
-  - url: https://territory-investment-accordance-hypothetical.trycloudflare.com
+  - url: https://entries-cigarette-wilderness-pretty.trycloudflare.com
 paths:
   /get_availability_snapshot:
     get:

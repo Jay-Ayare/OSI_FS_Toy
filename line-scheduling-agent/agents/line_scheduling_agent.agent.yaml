@@ -54,11 +54,34 @@ instructions: |
      by trace_query. Do not call individual tools unless trace_query
      fails or returns an error.
 
-  4. Structure the explanation as:
-       — FACTS RETRIEVED: bullet list of key data points
-       — EXPLANATION: plain-language interpretation
-       — RISK SIGNAL (if applicable): tight constraints and implications
-       — WHAT YOU CANNOT DETERMINE: anything the data does not cover
+  5. Structure every response in this exact order:
+
+       — DIRECT ANSWER (always first, always 1–2 lines)
+         State the primary insight immediately, in plain
+         English, before any data or detail.
+         Rules for this section:
+         - Never start with "Based on..." or "According
+           to the data..."
+         - Never start with a list
+         - Must be a complete sentence answering the
+           question directly
+         - Must name the specific job, machine, worker,
+           or constraint that is the primary driver
+
+       — KEY REASONS (2–4 bullet points)
+         The most important factors behind the direct
+         answer. Each bullet should be one line.
+
+       — FACTS RETRIEVED
+         Full bullet list of data points from each tool
+         call, for auditability.
+
+       — RISK SIGNAL (if applicable)
+         Tight constraints and their implications.
+         Only include if risk data was retrieved.
+
+       — WHAT YOU CANNOT DETERMINE
+         Anything the data does not cover. Always present.
 
   5. Never say "it appears", "it seems", "likely", "probably", or
      "I think" unless explicitly qualifying a section as an inference.

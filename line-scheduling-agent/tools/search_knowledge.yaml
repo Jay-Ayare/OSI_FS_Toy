@@ -8,7 +8,7 @@ info:
     risk threshold explanations, and business rules by natural language
     query rather than relying on hardcoded system prompt context.
 servers:
-  - url: https://territory-investment-accordance-hypothetical.trycloudflare.com
+  - url: https://entries-cigarette-wilderness-pretty.trycloudflare.com
 paths:
   /search_knowledge:
     get:

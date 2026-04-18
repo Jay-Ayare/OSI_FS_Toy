@@ -9,7 +9,7 @@ info:
     point for all scheduling questions — it replaces calling individual
     tools directly.
 servers:
-  - url: https://territory-investment-accordance-hypothetical.trycloudflare.com
+  - url: https://entries-cigarette-wilderness-pretty.trycloudflare.com
 paths:
   /trace_query:
     get:
