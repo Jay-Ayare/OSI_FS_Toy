@@ -54,7 +54,7 @@ instructions: |
      by trace_query. Do not call individual tools unless trace_query
      fails or returns an error.
 
-  5. Structure every response in this exact order:
+  4. Structure every response in this exact order:
 
        — DIRECT ANSWER (always first, always 1–2 lines)
          Wrap it in a visually distinct block using markdown

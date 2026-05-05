@@ -8,7 +8,7 @@ info:
     risk threshold explanations, and business rules by natural language
     query rather than relying on hardcoded system prompt context.
 servers:
-  - url: https://entries-cigarette-wilderness-pretty.trycloudflare.com
+  - url: https://oregon-owners-rehab-bradford.trycloudflare.com
 paths:
   /search_knowledge:
     get:
@@ -19,7 +19,8 @@ paths:
         (constraint glossary, risk thresholds, business rules) and returns
         the top matching document chunks. Call this when you need to explain
         what a constraint means, what a risk level implies, or how the
-        scheduler makes decisions.
+        scheduler makes decisions. Pass intent to enable intent-aware
+        threshold filtering. Pass n_results to override with a fixed count.
       parameters:
         - name: query
           in: query
@@ -27,13 +28,32 @@ paths:
           schema:
             type: string
           description: Natural language question or topic to search for
+        - name: intent
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - diagnostic
+              - risk_assessment
+              - availability
+              - general
+              - default
+            default: default
+          description: >
+            Classified intent of the user question. Controls how many
+            candidate chunks are retrieved and the distance threshold
+            applied. If omitted, default config is used (max 6 candidates,
+            threshold 0.50).
         - name: n_results
           in: query
           required: false
           schema:
             type: integer
-            default: 3
-          description: Number of results to return (default 3)
+          description: >
+            Hard override for number of results. If set, bypasses
+            intent-aware threshold filtering and returns exactly this
+            many chunks. Use only when a fixed count is required.
       responses:
         "200":
           description: Matching knowledge chunks
@@ -44,9 +64,9 @@ paths:
                 properties:
                   query:
                     type: string
-                  n_results:
-                    type: integer
-                  results:
+                  intent:
+                    type: string
+                  chunks:
                     type: array
                     items:
                       type: object
@@ -61,5 +81,16 @@ paths:
                           type: string
                         distance:
                           type: number
+                  chunks_returned:
+                    type: integer
+                  config_used:
+                    type: object
+                    properties:
+                      max_candidates:
+                        type: integer
+                      threshold:
+                        type: number
+                      mode:
+                        type: string
         "400":
           description: Missing query parameter

@@ -185,6 +185,45 @@ All endpoints served at `http://localhost:5001`. Requires `?run_id=RUN-001&date=
 
 ---
 
+## Observability — Langfuse Tracing
+
+Every call to `/trace_query` emits a structured trace to [Langfuse](https://cloud.langfuse.com) showing each pipeline node, its inputs, outputs, and latency.
+
+### Setup (one-time)
+
+```bash
+pip3 install langfuse --break-system-packages
+```
+
+Credentials are pre-configured in `.env` and `observability/langfuse_client.py`. The env vars are also added to `~/.zshrc` for persistence.
+
+### What gets traced
+
+Each query produces one trace named `scheduling_explanation_pipeline` with these spans:
+
+| Span | Type | Present for |
+|------|------|-------------|
+| `classify_intent` | span | all intents |
+| `get_iis_report` | tool | diagnostic |
+| `get_constraint_slack` | tool | diagnostic, risk |
+| `get_allocation_trace` | tool | diagnostic |
+| `get_risk_score` | tool | risk |
+| `get_availability_snapshot` | tool | risk, availability |
+| `search_knowledge` | retriever | all intents |
+| `grounded_synthesis` | generation | all intents |
+
+See `observability/trace_schema.md` for the full reference.
+
+### Viewing traces
+
+Open [https://cloud.langfuse.com](https://cloud.langfuse.com) → Traces. Each trace shows the full span waterfall with inputs, outputs, and latency per node. The `/trace_query` response also includes a `langfuse_trace_id` field for direct linking.
+
+### Graceful degradation
+
+If `langfuse` is not installed or the credentials are missing, `microservices.py` logs a warning and continues running normally — tracing is optional.
+
+---
+
 ## Known Limitations
 
 - The Cloudflare quick tunnel URL changes on every restart — tool YAMLs must be updated and reimported each session. Use a named Cloudflare tunnel or deploy Flask to a permanent host to avoid this.

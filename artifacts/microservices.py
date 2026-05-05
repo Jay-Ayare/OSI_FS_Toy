@@ -5,7 +5,7 @@ Five REST endpoints that serve artifact data to the WatsonX agent tools.
 Each endpoint reads from the JSON artifact written by scheduler.py.
 
 Requirements:
-    pip install flask
+    pip install flask langfuse
 
 Run:
     python microservices.py
@@ -22,9 +22,37 @@ Test quickly with:
 """
 
 import os
+import sys
 import json
+import time
+import uuid
 from flask import Flask, request, jsonify
 from knowledge_base import search_knowledge
+
+# ── Langfuse observability (optional — degrades gracefully if unavailable) ──
+_langfuse_enabled = False
+try:
+    # Allow running microservices.py from the artifacts/ directory while
+    # the observability package lives one level up at the project root.
+    _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
+
+    from observability.langfuse_client import (
+        start_trace,
+        make_trace_id,
+        log_intent_classification,
+        log_tool_call,
+        log_knowledge_retrieval,
+        log_synthesis,
+        log_endpoint_call,
+        update_trace_output,
+        flush,
+    )
+    _langfuse_enabled = True
+    print("[observability] Langfuse tracing enabled.")
+except Exception as _lf_err:
+    print(f"[observability] Langfuse not available — tracing disabled. ({_lf_err})")
 
 app = Flask(__name__)
 
@@ -88,7 +116,7 @@ def get_iis_report():
 
     is_infeasible = artifact["solve_status"] in ("infeasible", "no_solution")
 
-    return jsonify({
+    result = {
         "run_id":          run_id,
         "date":            date,
         "solve_status":    artifact["solve_status"],
@@ -103,7 +131,12 @@ def get_iis_report():
             f"{artifact.get('objective_value')} time units. "
             f"No infeasibility conflict exists."
         ),
-    })
+    }
+
+    if _langfuse_enabled:
+        log_endpoint_call("get_iis_report", {"run_id": run_id, "date": date}, result)
+
+    return jsonify(result)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -157,6 +190,13 @@ def get_availability_snapshot():
             f"See low_hours_workers for details."
         )
 
+    if _langfuse_enabled:
+        log_endpoint_call(
+            "get_availability_snapshot",
+            {"run_id": run_id, "date": date, "resource_type": resource_type},
+            result,
+        )
+
     return jsonify(result)
 
 
@@ -197,18 +237,27 @@ def get_constraint_slack():
     # Surface the tightest constraints as a convenience field
     tight = [c for c in constraints if c.get("is_tight")]
 
-    return jsonify({
-        "run_id":              run_id,
-        "date":                date,
+    result = {
+        "run_id":               run_id,
+        "date":                 date,
         "constraint_id_filter": constraint_id or "all",
-        "constraints":         constraints,
-        "tight_constraints":   tight,
-        "tight_count":         len(tight),
+        "constraints":          constraints,
+        "tight_constraints":    tight,
+        "tight_count":          len(tight),
         "summary": (
             f"{len(tight)} of {len(constraints)} constraints are tight (gap = 0 "
             f"or resource fully binding)."
         ),
-    })
+    }
+
+    if _langfuse_enabled:
+        log_endpoint_call(
+            "get_constraint_slack",
+            {"run_id": run_id, "date": date, "constraint_id": constraint_id},
+            result,
+        )
+
+    return jsonify(result)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -254,7 +303,7 @@ def get_risk_score():
     for r in risks:
         level_counts[r["risk_level"]] = level_counts.get(r["risk_level"], 0) + 1
 
-    return jsonify({
+    result = {
         "run_id":      run_id,
         "date":        date,
         "task_filter": task_id or "all",
@@ -267,7 +316,16 @@ def get_risk_score():
                 if r["risk_level"] in ("high", "critical")
             ],
         },
-    })
+    }
+
+    if _langfuse_enabled:
+        log_endpoint_call(
+            "get_risk_score",
+            {"run_id": run_id, "date": date, "task_id": task_id, "person_id": person_id},
+            result,
+        )
+
+    return jsonify(result)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -307,7 +365,7 @@ def get_allocation_trace():
 
     unassigned = [t for t in traces if not t["is_present"]]
 
-    return jsonify({
+    result = {
         "run_id":          run_id,
         "date":            date,
         "task_filter":     task_id or "all",
@@ -319,7 +377,16 @@ def get_allocation_trace():
             "unassigned":      len(unassigned),
             "makespan":        artifact.get("objective_value"),
         },
-    })
+    }
+
+    if _langfuse_enabled:
+        log_endpoint_call(
+            "get_allocation_trace",
+            {"run_id": run_id, "date": date, "task_id": task_id},
+            result,
+        )
+
+    return jsonify(result)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -330,17 +397,49 @@ def get_allocation_trace():
 def search_knowledge_endpoint():
     """
     Searches the ChromaDB knowledge base with a natural language query.
-    Returns the top matching constraint glossary, risk threshold,
-    or business rule chunks.
+    Uses intent-aware threshold filtering by default.
+    Pass n_results to override with a fixed count (bypasses threshold).
+    Pass intent to select the appropriate retrieval config.
     """
-    query     = request.args.get("query")
-    n_results = int(request.args.get("n_results", 3))
+    query     = request.args.get("query", "")
+    intent    = request.args.get("intent", "default")
+    n_results = request.args.get("n_results", None)
 
     if not query:
         return jsonify({"error": "missing_parameter", "message": "'query' is required."}), 400
 
-    results = search_knowledge(query, n_results=n_results)
-    return jsonify({"query": query, "n_results": n_results, "results": results})
+    if n_results is not None:
+        n_results = int(n_results)
+
+    from knowledge_base import search_knowledge as _search, INTENT_RETRIEVAL_CONFIG
+
+    chunks = _search(query, intent=intent, n_results=n_results)
+
+    config_used = (
+        None if n_results is not None
+        else INTENT_RETRIEVAL_CONFIG.get(intent, INTENT_RETRIEVAL_CONFIG["default"])
+    )
+
+    return jsonify({
+        "query":           query,
+        "intent":          intent,
+        "chunks":          chunks,
+        "chunks_returned": len(chunks),
+        "config_used": {
+            "max_candidates": (
+                n_results if n_results is not None
+                else config_used["max_candidates"]
+            ),
+            "threshold": (
+                None if n_results is not None
+                else config_used["threshold"]
+            ),
+            "mode": (
+                "override" if n_results is not None
+                else "intent_aware"
+            ),
+        },
+    })
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -353,7 +452,8 @@ def _classify_intent(user_message: str) -> dict:
 
     diagnostic_keywords   = ["why", "not assigned", "not scheduled", "constraint",
                               "violation", "cause", "reason", "explain", "decision",
-                              "allocation", "assigned"]
+                              "allocation", "assigned", "tight", "slack", "gap",
+                              "mean", "what does", "what is"]
     risk_keywords         = ["risk", "risky", "safe", "dangerous", "fragile",
                               "could fail", "backup", "what if", "concern", "warning"]
     availability_keywords = ["available", "availability", "who can", "which machine",
@@ -451,6 +551,7 @@ def trace_query():
     Runs: classify_intent → tool_chain → knowledge_retrieval →
           context_assembly → (synthesis ready)
     Returns trace + assembled context for the agent to synthesise.
+    Also emits a structured Langfuse trace when observability is enabled.
 
     Query params:
         run_id       — solver run identifier
@@ -461,17 +562,29 @@ def trace_query():
     run_id       = request.args.get("run_id")
     date         = request.args.get("date")
     user_message = request.args.get("user_message", "")
-    n_results    = int(request.args.get("n_results", 3))
+    n_results    = request.args.get("n_results", None)
+    if n_results is not None:
+        n_results = int(n_results)
 
     artifact, err = load_artifact(run_id, date)
     if err:
         return err
 
+    # ── Langfuse: open one trace for this entire pipeline run ─────
+    lf_trace_id = make_trace_id() if _langfuse_enabled else str(uuid.uuid4())
+    if _langfuse_enabled:
+        start_trace(
+            trace_id=lf_trace_id,
+            run_id=run_id,
+            date=date,
+            user_message=user_message,
+        )
+
     trace = []
 
     # ── STEP 1: classify_intent ───────────────────────────────────
     classification = _classify_intent(user_message)
-    intent  = classification["intent"]
+    intent   = classification["intent"]
     entities = classification["entities"]
     trace.append({
         "step":   "classify_intent",
@@ -482,10 +595,134 @@ def trace_query():
         },
     })
 
+    if _langfuse_enabled:
+        log_intent_classification(
+            trace_id=lf_trace_id,
+            user_message=user_message,
+            classified_intent=intent,
+            entities=entities,
+            run_id=run_id,
+            date=date,
+        )
+
     # ── STEP 2: tool_chain ────────────────────────────────────────
-    tool_result = _run_tool_chain(intent, artifact)
-    tools_called = tool_result["tools_called"]
-    tool_results = tool_result["results"]
+    # Run each tool individually so we can capture per-tool latency.
+    tools_called = []
+    tool_results = {}
+
+    if intent == "diagnostic":
+        tools_called = ["get_iis_report", "get_constraint_slack", "get_allocation_trace"]
+
+        # get_iis_report
+        _t0 = time.time()
+        is_infeasible = artifact["solve_status"] in ("infeasible", "no_solution")
+        iis_result = {
+            "solve_status":    artifact["solve_status"],
+            "is_infeasible":   is_infeasible,
+            "objective_value": artifact.get("objective_value"),
+            "conflict_set":    artifact.get("conflict_set", []),
+        }
+        _latency = int((time.time() - _t0) * 1000)
+        tool_results["iis_report"] = iis_result
+        if _langfuse_enabled:
+            log_tool_call(lf_trace_id, "get_iis_report",
+                          {"run_id": run_id, "date": date}, iis_result, _latency)
+
+        # get_constraint_slack
+        _t0 = time.time()
+        all_constraints = artifact.get("constraint_analysis", [])
+        tight = [c for c in all_constraints if c.get("is_tight")]
+        constraint_result = {
+            "constraints":       all_constraints,
+            "tight_constraints": tight,
+            "tight_count":       len(tight),
+        }
+        _latency = int((time.time() - _t0) * 1000)
+        tool_results["constraint_slack"] = constraint_result
+        if _langfuse_enabled:
+            log_tool_call(lf_trace_id, "get_constraint_slack",
+                          {"run_id": run_id, "date": date}, constraint_result, _latency)
+
+        # get_allocation_trace
+        _t0 = time.time()
+        allocation_result = {
+            "traces":   artifact.get("allocation_trace", []),
+            "makespan": artifact.get("objective_value"),
+        }
+        _latency = int((time.time() - _t0) * 1000)
+        tool_results["allocation_trace"] = allocation_result
+        if _langfuse_enabled:
+            log_tool_call(lf_trace_id, "get_allocation_trace",
+                          {"run_id": run_id, "date": date}, allocation_result, _latency)
+
+    elif intent == "risk_assessment":
+        tools_called = ["get_risk_score", "get_constraint_slack", "get_availability_snapshot"]
+
+        # get_risk_score
+        _t0 = time.time()
+        all_risks = artifact.get("risk_analysis", [])
+        level_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+        for r in all_risks:
+            level_counts[r["risk_level"]] = level_counts.get(r["risk_level"], 0) + 1
+        risk_result = {
+            "risks":   all_risks,
+            "summary": {
+                "by_risk_level":      level_counts,
+                "highest_risk_jobs":  [r["job_id"] for r in all_risks
+                                       if r["risk_level"] in ("high", "critical")],
+            },
+        }
+        _latency = int((time.time() - _t0) * 1000)
+        tool_results["risk_score"] = risk_result
+        if _langfuse_enabled:
+            log_tool_call(lf_trace_id, "get_risk_score",
+                          {"run_id": run_id, "date": date}, risk_result, _latency)
+
+        # get_constraint_slack
+        _t0 = time.time()
+        all_constraints = artifact.get("constraint_analysis", [])
+        tight = [c for c in all_constraints if c.get("is_tight")]
+        constraint_result = {
+            "constraints":       all_constraints,
+            "tight_constraints": tight,
+            "tight_count":       len(tight),
+        }
+        _latency = int((time.time() - _t0) * 1000)
+        tool_results["constraint_slack"] = constraint_result
+        if _langfuse_enabled:
+            log_tool_call(lf_trace_id, "get_constraint_slack",
+                          {"run_id": run_id, "date": date}, constraint_result, _latency)
+
+        # get_availability_snapshot
+        _t0 = time.time()
+        snapshot = artifact.get("availability_snapshot", {})
+        availability_result = {
+            "machines": snapshot.get("machines", []),
+            "workers":  snapshot.get("workers", []),
+        }
+        _latency = int((time.time() - _t0) * 1000)
+        tool_results["availability_snapshot"] = availability_result
+        if _langfuse_enabled:
+            log_tool_call(lf_trace_id, "get_availability_snapshot",
+                          {"run_id": run_id, "date": date}, availability_result, _latency)
+
+    elif intent == "availability":
+        tools_called = ["get_availability_snapshot"]
+
+        _t0 = time.time()
+        snapshot = artifact.get("availability_snapshot", {})
+        availability_result = {
+            "machines": snapshot.get("machines", []),
+            "workers":  snapshot.get("workers", []),
+        }
+        _latency = int((time.time() - _t0) * 1000)
+        tool_results["availability_snapshot"] = availability_result
+        if _langfuse_enabled:
+            log_tool_call(lf_trace_id, "get_availability_snapshot",
+                          {"run_id": run_id, "date": date}, availability_result, _latency)
+
+    # general intent: no tool calls
+
     trace.append({
         "step":         "tool_chain",
         "tools_called": tools_called,
@@ -494,13 +731,22 @@ def trace_query():
     })
 
     # ── STEP 3: knowledge_retrieval ───────────────────────────────
-    knowledge_chunks = search_knowledge(user_message, n_results=n_results)
+    _t0 = time.time()
+    knowledge_chunks = search_knowledge(user_message, intent=intent)
+    _latency = int((time.time() - _t0) * 1000)
     chunk_ids = [c["id"] for c in knowledge_chunks]
     trace.append({
         "step":        "knowledge_retrieval",
         "chunks_used": chunk_ids,
         "summary":     f"Retrieved {len(knowledge_chunks)} knowledge chunks: {chunk_ids}",
     })
+
+    if _langfuse_enabled:
+        log_knowledge_retrieval(
+            trace_id=lf_trace_id,
+            query=user_message,
+            chunks_returned=knowledge_chunks,
+        )
 
     # ── STEP 4: context_assembly ──────────────────────────────────
     formatted_chunks = "\n".join(
@@ -521,10 +767,30 @@ def trace_query():
     })
 
     # ── STEP 5: synthesis (ready) ─────────────────────────────────
+    # The actual LLM call happens in WatsonX Orchestrate after this
+    # endpoint returns. We log a placeholder generation span here so
+    # the trace is complete. synthesis is always the LAST span emitted —
+    # all tool calls and knowledge retrieval are already logged above.
+    final_response = "[pending — LLM synthesis occurs in WatsonX Orchestrate]"
     trace.append({
         "step":   "synthesis",
         "status": "ready — context assembled, awaiting LLM synthesis",
     })
+
+    if _langfuse_enabled:
+        # FIX 3: synthesis span is emitted last, after all tool + retrieval spans
+        log_synthesis(
+            trace_id=lf_trace_id,
+            assembled_context=assembled_context,
+            final_response=final_response,
+        )
+        # FIX 2: set root trace output to the assembled context summary
+        # so the trace is searchable by question and answer in Langfuse
+        update_trace_output(
+            trace_id=lf_trace_id,
+            final_response=f"Context assembled for: {user_message}",
+        )
+        flush()
 
     # ── Format trace as readable string ──────────────────────────
     trace_lines = ["=== FLOW TRACE ==="]
@@ -557,6 +823,7 @@ def trace_query():
         "trace":             trace,
         "trace_readable":    "\n".join(trace_lines),
         "assembled_context": assembled_context,
+        "langfuse_trace_id": lf_trace_id if _langfuse_enabled else None,
     })
 
 

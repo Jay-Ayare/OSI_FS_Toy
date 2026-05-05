@@ -1,202 +1,591 @@
 """
-knowledge_base.py
-=================
-Builds and queries a local ChromaDB vector store containing
-Layer 1 domain knowledge: constraint glossary, risk thresholds,
-and business rules for the line scheduling system.
+knowledge_base.py — Layer 1 Domain Knowledge
+=============================================
+Builds and queries the ChromaDB vector knowledge base for the
+line scheduling XAI system.
 
-Run once to index:
+DESIGN PRINCIPLE — STRICT SEPARATION OF CONCERNS:
+  This file contains ONLY timeless domain knowledge:
+    - What constraints mean (definitions)
+    - How the scheduler makes decisions (business rules)
+    - What risk levels imply (risk thresholds)
+    - How to interpret scheduling concepts (concepts)
+
+  This file does NOT contain:
+    - Any data from a specific solver run
+    - Any specific job assignments, start/end times
+    - Any specific worker hours or availability values
+    - Any specific machine status for a particular date
+    - Any constraint slack or tightness values for a run
+
+  All run-specific facts come exclusively from the five
+  microservice tool endpoints (get_iis_report,
+  get_availability_snapshot, get_constraint_slack,
+  get_risk_score, get_allocation_trace).
+
+  The knowledge base answers "what does X mean?"
+  The tool endpoints answer "what happened in run Y?"
+
+Run:
     python knowledge_base.py
 
-Then import search_knowledge() from microservices.py.
+This rebuilds the ChromaDB collection from scratch.
+The chroma_db/ folder is created in the current directory.
 """
 
 import os
 import chromadb
 from chromadb.utils import embedding_functions
 
-# ── ChromaDB setup ────────────────────────────────────────────
-CHROMA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
-COLLECTION_NAME = "scheduling_knowledge"
+# ─────────────────────────────────────────────────────────────────
+# CHROMADB SETUP
+# ─────────────────────────────────────────────────────────────────
 
-embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"
+CHROMA_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
+COLLECTION_NAME = "scheduling_knowledge"
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+
+client = chromadb.PersistentClient(path=CHROMA_PATH)
+ef     = embedding_functions.SentenceTransformerEmbeddingFunction(
+    model_name=EMBEDDING_MODEL
 )
 
+# ─────────────────────────────────────────────────────────────────
+# INTENT-AWARE RETRIEVAL CONFIG
+# ─────────────────────────────────────────────────────────────────
 
-def get_collection():
-    client = chromadb.PersistentClient(path=CHROMA_DIR)
-    return client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        embedding_function=embedding_fn,
-    )
+INTENT_RETRIEVAL_CONFIG = {
+    "diagnostic": {
+        "max_candidates": 4,
+        "threshold":      0.45,
+        "rationale": (
+            "Constraint-specific queries need precision. "
+            "Tight threshold avoids pulling in irrelevant "
+            "business rules when explaining a specific "
+            "constraint or allocation decision."
+        ),
+    },
+    "risk_assessment": {
+        "max_candidates": 5,
+        "threshold":      0.50,
+        "rationale": (
+            "Risk queries need both constraint definitions "
+            "and risk threshold docs to answer properly. "
+            "Slightly broader retrieval to mix doc types."
+        ),
+    },
+    "availability": {
+        "max_candidates": 3,
+        "threshold":      0.50,
+        "rationale": (
+            "Availability queries map closely to a small "
+            "set of worker and machine rule documents. "
+            "Keep retrieval tight."
+        ),
+    },
+    "general": {
+        "max_candidates": 8,
+        "threshold":      0.65,
+        "rationale": (
+            "Open-ended or conceptual queries benefit from "
+            "broader retrieval. Cast a wide net across all "
+            "document types."
+        ),
+    },
+    "default": {
+        "max_candidates": 6,
+        "threshold":      0.50,
+        "rationale":      "Fallback config for unknown intent.",
+    },
+}
 
+# ─────────────────────────────────────────────────────────────────
+# LAYER 1 DOCUMENTS
+# ─────────────────────────────────────────────────────────────────
+# Each document is a timeless definition, rule, or concept.
+# NO run-specific data. NO specific job names, worker values,
+# machine states, or constraint outcomes from any solver run.
+# ─────────────────────────────────────────────────────────────────
 
-# ── Documents ─────────────────────────────────────────────────
 DOCUMENTS = [
+
+    # ── CONSTRAINT CONCEPTS ──────────────────────────────────────
+
     {
-        "id": "C1",
-        "type": "constraint",
-        "title": "No-overlap constraint",
+        "id":    "CONCEPT_NO_OVERLAP",
+        "type":  "constraint_concept",
+        "title": "No-overlap constraint — what it means",
         "content": (
-            "The no-overlap constraint ensures that no two jobs run on the same machine "
-            "at the same time. If jobs J_a and J_b are both assigned to machine M, one "
-            "must fully complete before the other begins. A gap of 0 between them means "
-            "the constraint is tight — back to back with no buffer. Any gap greater than "
-            "0 means there is idle time on the machine between those jobs."
+            "A no-overlap constraint ensures that no two jobs run "
+            "on the same machine at the same time. If two jobs are "
+            "both assigned to the same machine, one must completely "
+            "finish before the other can begin. "
+            "When the gap between two consecutive jobs on a machine "
+            "is 0, the constraint is called tight — the jobs are "
+            "back-to-back with zero idle time between them. "
+            "A gap greater than 0 means there is idle time on that "
+            "machine between those two jobs, which gives some "
+            "tolerance for delays. "
+            "A tight no-overlap constraint is a schedule risk signal "
+            "because any overrun on the first job will directly delay "
+            "the second job with no buffer to absorb it."
         ),
     },
+
     {
-        "id": "C2",
-        "type": "constraint",
-        "title": "Precedence constraint — J3 after J1",
+        "id":    "CONCEPT_PRECEDENCE",
+        "type":  "constraint_concept",
+        "title": "Precedence constraint — what it means",
         "content": (
-            "Job 3 (assembly) cannot start until Job 1 (welding) has fully finished. "
-            "This is a hard precedence constraint. A gap of 0 means J3 started exactly "
-            "when J1 ended — the constraint is tight and any delay to J1 directly delays "
-            "J3 with no buffer. A positive gap means J3 was able to wait and there is "
-            "some tolerance for J1 running over."
+            "A precedence constraint enforces that one job (the "
+            "successor) cannot start until another job (the "
+            "predecessor) has fully finished. "
+            "The gap value measures how much time passes between "
+            "the predecessor ending and the successor starting. "
+            "A gap of 0 means the successor starts exactly when "
+            "the predecessor ends — the constraint is tight and "
+            "there is no buffer. Any delay to the predecessor "
+            "directly delays the successor with zero tolerance. "
+            "A positive gap means the successor was forced to wait "
+            "for other reasons (such as a machine being busy), "
+            "which provides some tolerance for the predecessor "
+            "running slightly over. "
+            "Tight precedence constraints are the primary source "
+            "of cascade risk in a schedule — a single upstream "
+            "delay propagates downstream through every dependent job."
         ),
     },
+
     {
-        "id": "C3",
-        "type": "constraint",
-        "title": "Precedence constraint — J5 after J2",
+        "id":    "CONCEPT_MACHINE_AVAILABILITY",
+        "type":  "constraint_concept",
+        "title": "Machine availability constraint — what it means",
         "content": (
-            "Job 5 (painting) cannot start until Job 2 (painting preparation) has fully "
-            "finished. A gap of 0 means the constraint is tight. A gap greater than 0 "
-            "means J5 had to wait for other reasons (e.g. machine busy) and there is "
-            "tolerance for J2 running over."
+            "A machine availability constraint excludes a specific "
+            "machine from being used during a scheduling run. "
+            "When a machine is unavailable (for example, due to "
+            "scheduled maintenance, breakdown, or calibration), "
+            "all jobs that could have used that machine must be "
+            "reassigned to the remaining available machines. "
+            "This increases competition for the available machines "
+            "and can extend the overall makespan. "
+            "The constraint is always considered tight when a "
+            "machine is fully excluded, because removing it forces "
+            "the optimizer to use suboptimal assignments for some "
+            "jobs. The impact is proportional to how many jobs "
+            "listed that machine as their preferred option."
         ),
     },
+
     {
-        "id": "C4",
-        "type": "constraint",
-        "title": "Machine availability constraint",
+        "id":    "CONCEPT_WORKER_HOURS",
+        "type":  "constraint_concept",
+        "title": "Worker hours constraint — what it means",
         "content": (
-            "Machine M3 is excluded from all scheduling on this date due to scheduled "
-            "maintenance. Any job that could have run on M3 must be reassigned to M1 or "
-            "M2, increasing competition for those machines and potentially extending the "
-            "makespan."
+            "A worker hours constraint limits how many hours a "
+            "worker can be assigned during a shift or day. "
+            "Each worker has a maximum allowed hours value and "
+            "an hours-already-worked value. The remaining capacity "
+            "is max_hours minus hours_already_worked. "
+            "When a worker's remaining hours are very low, they "
+            "cannot be assigned to jobs that would exceed their "
+            "capacity. This is especially significant when that "
+            "worker is the only one with the required skill for "
+            "certain jobs — their unavailability creates a risk "
+            "of those jobs being unassignable. "
+            "A worker hours constraint is considered tight when "
+            "the remaining hours are at or near the minimum "
+            "threshold needed to cover any job requiring that "
+            "worker's skills."
         ),
     },
+
+    # ── SCHEDULING CONCEPTS ──────────────────────────────────────
+
     {
-        "id": "C5",
-        "type": "constraint",
-        "title": "Worker hours constraint",
+        "id":    "CONCEPT_MAKESPAN",
+        "type":  "scheduling_concept",
+        "title": "Makespan — definition and significance",
         "content": (
-            "Worker W1 has only 2 hours remaining in their shift today. W1 holds welding "
-            "and assembly skills. Because of this limit, W1 cannot be assigned to jobs "
-            "that would exceed their remaining capacity. This constraint is tight when W1 "
-            "is the only qualified worker for a given job."
+            "Makespan is the total elapsed time from the start of "
+            "the first job to the completion of the last job across "
+            "all machines. It is the primary objective the scheduler "
+            "minimises. "
+            "The makespan is determined by whichever job finishes "
+            "last. Reducing makespan requires either shortening the "
+            "critical path (the chain of jobs and constraints that "
+            "determines the last finish time) or reassigning jobs "
+            "to machines where they complete faster. "
+            "Makespan does not account for cost, worker preference, "
+            "ergonomics, or quality — it is a pure time measure. "
+            "Any question about financial cost or budget is outside "
+            "the scope of the makespan-based scheduling model."
         ),
     },
+
     {
-        "id": "R1",
-        "type": "risk_threshold",
-        "title": "Risk level definitions",
+        "id":    "CONCEPT_CONSTRAINT_TIGHTNESS",
+        "type":  "scheduling_concept",
+        "title": "Constraint tightness — what tight and slack mean",
         "content": (
-            "Risk levels are computed deterministically from four factors: number of "
-            "qualified backup workers, hours already worked by the assigned worker, "
-            "machine availability reduction, and precedence tightness. Low risk = 0 "
-            "contributing factors. Medium risk = 1 contributing factor. High risk = 2 "
-            "factors. Critical risk = 3 or more factors. A qualified backup count of 0 "
-            "means there is no alternative worker if the assigned worker becomes unavailable."
+            "A constraint is described as tight when it is operating "
+            "at its exact limit with no spare capacity. For interval "
+            "constraints in CP Optimizer, tightness is measured by "
+            "the gap between consecutive jobs or events. "
+            "A gap of 0 means tight — the constraint is binding and "
+            "any disruption will immediately cause a violation. "
+            "A gap greater than 0 means the constraint has slack — "
+            "there is tolerance before a violation occurs. "
+            "Tight constraints are the first place to look when "
+            "diagnosing why a schedule is fragile or why a delay "
+            "cascades. They represent the bottlenecks of the schedule."
         ),
     },
+
     {
-        "id": "R2",
-        "type": "risk_threshold",
+        "id":    "CONCEPT_CRITICAL_PATH",
+        "type":  "scheduling_concept",
+        "title": "Critical path — what determines the makespan",
+        "content": (
+            "The critical path is the sequence of jobs and "
+            "constraints that determines the minimum possible "
+            "makespan. Any delay on the critical path directly "
+            "increases the makespan by the same amount. "
+            "Jobs on the critical path have zero slack — they "
+            "cannot be delayed without extending the overall "
+            "schedule. Jobs off the critical path have positive "
+            "slack — they can be delayed up to their slack amount "
+            "without affecting the makespan. "
+            "Tight precedence constraints and tight no-overlap "
+            "constraints are indicators of critical path membership. "
+            "When asking why a schedule cannot finish earlier, "
+            "the answer is always found by tracing the critical path."
+        ),
+    },
+
+    {
+        "id":    "CONCEPT_ALTERNATIVE_MACHINE",
+        "type":  "scheduling_concept",
+        "title": "Machine selection — how the solver chooses",
+        "content": (
+            "For each job, the solver considers all available "
+            "machines that the job can run on and selects exactly "
+            "one. The selection is driven by the makespan "
+            "minimisation objective combined with the no-overlap "
+            "constraint. "
+            "A job will be assigned to the machine that results "
+            "in the lowest overall makespan, not necessarily the "
+            "machine where the job runs fastest in isolation. "
+            "If the fastest machine for a job is already heavily "
+            "occupied by other jobs, the solver may assign the "
+            "job to a slower machine that has a free window, "
+            "because this produces a better overall schedule. "
+            "The alternatives_considered field in the allocation "
+            "trace shows all machines the solver evaluated and "
+            "which one was selected."
+        ),
+    },
+
+    {
+        "id":    "CONCEPT_WORKER_ASSIGNMENT",
+        "type":  "scheduling_concept",
+        "title": "Worker assignment — how workers are allocated",
+        "content": (
+            "Worker assignment is a post-solve step that maps "
+            "workers to jobs based on skill match and remaining "
+            "hours. The solver itself optimises machine assignment "
+            "and timing — worker assignment follows from that. "
+            "A worker can only be assigned to a job if they have "
+            "the required skill for that job. Among qualified "
+            "workers, the one with the most remaining hours is "
+            "preferred, as this reduces the risk of hitting hour "
+            "limits mid-schedule. "
+            "If only one worker has the required skill for a job, "
+            "that worker is the sole qualified person and their "
+            "absence or exhaustion creates an unresolvable gap. "
+            "The qualified_backup_count in the risk analysis "
+            "shows how many alternative workers could cover "
+            "a job if the assigned worker became unavailable."
+        ),
+    },
+
+    # ── RISK CONCEPTS ─────────────────────────────────────────────
+
+    {
+        "id":    "CONCEPT_RISK_LEVELS",
+        "type":  "risk_concept",
+        "title": "Risk levels — how they are defined and computed",
+        "content": (
+            "Risk levels are computed deterministically from four "
+            "contributing factors. Each factor that applies adds 1 "
+            "to the risk score. "
+            "Low risk: 0 contributing factors. The assignment is "
+            "stable with no identified vulnerability. "
+            "Medium risk: 1 contributing factor. One vulnerability "
+            "exists but the assignment is generally manageable. "
+            "High risk: 2 contributing factors. Multiple "
+            "vulnerabilities compound each other. "
+            "Critical risk: 3 or more contributing factors. The "
+            "assignment is fragile and should be reviewed before "
+            "the schedule is executed. "
+            "The four possible contributing factors are: "
+            "tight precedence constraint with no buffer, "
+            "machine availability reduction reducing options, "
+            "the assigned worker having very few hours remaining, "
+            "and no qualified backup worker existing for the job."
+        ),
+    },
+
+    {
+        "id":    "CONCEPT_RISK_TIGHT_PRECEDENCE",
+        "type":  "risk_concept",
         "title": "Tight precedence as a risk signal",
         "content": (
-            "When a precedence constraint has a gap of 0, it is classified as a risk "
-            "signal regardless of other factors. This is because any disruption to the "
-            "predecessor job (machine fault, worker absence, extended duration) directly "
-            "cascades to the successor job with zero tolerance."
+            "A tight precedence constraint is flagged as a risk "
+            "factor regardless of other conditions. This is because "
+            "a gap of 0 between a predecessor and successor job "
+            "means any disruption to the predecessor — a machine "
+            "fault, a worker running late, extended setup time, "
+            "or any other cause of overrun — will immediately "
+            "cascade to the successor job with zero tolerance. "
+            "In a chain of dependent jobs, a single tight "
+            "precedence at any point can cause the entire "
+            "downstream chain to shift, potentially affecting "
+            "the makespan. The longer the chain and the earlier "
+            "the tight constraint, the greater the cascade risk."
         ),
     },
+
     {
-        "id": "R3",
-        "type": "risk_threshold",
-        "title": "Worker exhaustion as a risk signal",
+        "id":    "CONCEPT_RISK_BACKUP_COUNT",
+        "type":  "risk_concept",
+        "title": "Qualified backup count — what it means for risk",
         "content": (
-            "When the assigned worker has 2 or fewer hours remaining in their shift, this "
-            "is flagged as a contributing risk factor. If that worker is also the only "
-            "qualified person for the job (backup count = 0), the combined risk level "
-            "escalates to high or critical."
+            "The qualified backup count is the number of workers "
+            "who could cover a job if the assigned worker became "
+            "unavailable. It is calculated as the total number of "
+            "workers with the required skill minus one (the "
+            "assigned worker themselves). "
+            "A backup count of 0 means there is no alternative "
+            "worker. If the assigned worker is absent, ill, or "
+            "exhausted, the job cannot be covered and will either "
+            "be delayed or left unassigned. This is the highest "
+            "single-factor risk signal in the system. "
+            "A backup count of 1 means one alternative exists, "
+            "which provides minimal but non-zero resilience. "
+            "Higher backup counts indicate greater schedule "
+            "resilience against worker-related disruptions."
         ),
     },
+
     {
-        "id": "B1",
-        "type": "business_rule",
-        "title": "Makespan objective",
+        "id":    "CONCEPT_INFEASIBILITY",
+        "type":  "risk_concept",
+        "title": "Infeasibility — when the model cannot find a solution",
         "content": (
-            "The scheduler minimises makespan — the total time from the start of the first "
-            "job to the end of the last job across all machines. It does not optimise for "
-            "cost, worker preference, or ergonomics. Any question about financial cost or "
-            "budget is out of scope for this system."
+            "A schedule is infeasible when the combination of "
+            "constraints makes it mathematically impossible to "
+            "assign all jobs within the given rules. "
+            "The solver identifies the minimal set of constraints "
+            "that together cause the impossibility — this is called "
+            "the conflict set (equivalent to the Irreducible "
+            "Infeasible Set in LP models). "
+            "Common causes of infeasibility include: all machines "
+            "for a required job being unavailable simultaneously, "
+            "a worker being the only qualified person for multiple "
+            "jobs that overlap in time, or a precedence chain that "
+            "cannot be satisfied within the available time horizon. "
+            "When the model is feasible, the conflict set is empty "
+            "and the solve_status is optimal or feasible."
         ),
     },
+
+    # ── SYSTEM SCOPE ─────────────────────────────────────────────
+
     {
-        "id": "B2",
-        "type": "business_rule",
-        "title": "Machine assignment logic",
+        "id":    "CONCEPT_SYSTEM_SCOPE",
+        "type":  "system_concept",
+        "title": "What this system can and cannot answer",
         "content": (
-            "Each job must run on exactly one machine. The solver selects the machine that "
-            "minimises makespan while satisfying all constraints. M3 is excluded on this "
-            "date. Jobs are assigned to M1 or M2 based on their processing times on each "
-            "machine and the no-overlap constraint."
-        ),
-    },
-    {
-        "id": "B3",
-        "type": "business_rule",
-        "title": "Worker assignment logic",
-        "content": (
-            "Worker assignment is determined by skill match and hours remaining. The worker "
-            "with the most hours remaining among those qualified for the required skill is "
-            "preferred. W1 (welding + assembly, 2h remaining) is deprioritised. W2 "
-            "(painting + assembly, 6h remaining) and W3 (welding + painting, 8h remaining) "
-            "are preferred for their respective skills."
+            "This scheduling explanation system can answer "
+            "questions about: why a specific job was assigned to "
+            "a specific machine, why a constraint is tight or "
+            "has slack, what the risk level of an assignment means, "
+            "which jobs are on the critical path, what the makespan "
+            "is and which job determines it, whether the model was "
+            "infeasible and what caused it, and which workers or "
+            "machines were available during a run. "
+            "This system cannot answer questions about: financial "
+            "cost or budget, worker pay rates, shift preferences "
+            "or ergonomics, quality metrics, customer satisfaction, "
+            "or any information not present in the solver artifact "
+            "and the domain knowledge base. "
+            "For out-of-scope questions, the system will explicitly "
+            "state that the information is not available rather "
+            "than estimating or fabricating an answer."
         ),
     },
 ]
 
+# ─────────────────────────────────────────────────────────────────
+# BUILD THE COLLECTION
+# ─────────────────────────────────────────────────────────────────
 
-def build_index():
-    """Index all documents into ChromaDB. Safe to re-run — upserts existing docs."""
-    collection = get_collection()
-    collection.upsert(
-        ids=[doc["id"] for doc in DOCUMENTS],
-        documents=[doc["content"] for doc in DOCUMENTS],
-        metadatas=[{"type": doc["type"], "id": doc["id"], "title": doc["title"]} for doc in DOCUMENTS],
+def build_knowledge_base():
+    """
+    Drops and rebuilds the ChromaDB collection from the
+    DOCUMENTS list. Call this whenever documents are updated.
+    """
+    try:
+        client.delete_collection(COLLECTION_NAME)
+        print(f"Dropped existing collection: {COLLECTION_NAME}")
+    except Exception:
+        pass
+
+    collection = client.create_collection(
+        name=COLLECTION_NAME,
+        embedding_function=ef,
+        metadata={"hnsw:space": "cosine"},
     )
-    print(f"Indexed {len(DOCUMENTS)} documents into '{COLLECTION_NAME}'.")
+
+    ids       = [doc["id"]      for doc in DOCUMENTS]
+    contents  = [doc["content"] for doc in DOCUMENTS]
+    metadatas = [
+        {"id": doc["id"], "type": doc["type"], "title": doc["title"]}
+        for doc in DOCUMENTS
+    ]
+
+    collection.add(ids=ids, documents=contents, metadatas=metadatas)
+
+    print(f"Indexed {len(DOCUMENTS)} documents into '{COLLECTION_NAME}'")
+    print("\nDocuments indexed:")
     for doc in DOCUMENTS:
-        print(f"  [{doc['type']}] {doc['id']}: {doc['title']}")
+        print(f"  [{doc['type']:25s}] {doc['id']:35s} — {doc['title']}")
+
+    return collection
 
 
-def search_knowledge(query: str, n_results: int = 3) -> list:
+# ─────────────────────────────────────────────────────────────────
+# QUERY FUNCTION
+# ─────────────────────────────────────────────────────────────────
+
+def get_collection():
+    """Returns the existing collection or raises if not built."""
+    return client.get_collection(name=COLLECTION_NAME, embedding_function=ef)
+
+
+def search_knowledge(query, intent="default", n_results=None):
     """
-    Search the knowledge base with a natural language query.
-    Returns a list of dicts with: id, title, type, content, distance.
+    Retrieves knowledge chunks dynamically.
+
+    If n_results is set explicitly, retrieves exactly that many
+    chunks with no threshold filtering (backward-compatible override).
+
+    Otherwise uses intent to select max_candidates and threshold
+    from INTENT_RETRIEVAL_CONFIG. Always returns at least 1 chunk.
+
+    Args:
+        query:     natural language search query
+        intent:    classified intent (diagnostic / risk_assessment /
+                   availability / general / default)
+        n_results: hard override — bypasses intent config
+    Returns:
+        list of dicts: id, title, type, content, distance
     """
     collection = get_collection()
+
+    # ── Override mode ──────────────────────────────────────────
+    if n_results is not None:
+        candidates = min(n_results, collection.count())
+        results = collection.query(
+            query_texts=[query],
+            n_results=candidates,
+            include=["documents", "metadatas", "distances"],
+        )
+        return [
+            {
+                "id":       m.get("id", "unknown"),
+                "title":    m.get("title", ""),
+                "type":     m.get("type", ""),
+                "content":  d,
+                "distance": round(dist, 4),
+            }
+            for d, m, dist in zip(
+                results["documents"][0],
+                results["metadatas"][0],
+                results["distances"][0],
+            )
+        ]
+
+    # ── Intent-aware threshold mode ────────────────────────────
+    config         = INTENT_RETRIEVAL_CONFIG.get(intent, INTENT_RETRIEVAL_CONFIG["default"])
+    max_candidates = min(config["max_candidates"], collection.count())
+    threshold      = config["threshold"]
+
     results = collection.query(
         query_texts=[query],
-        n_results=n_results,
+        n_results=max_candidates,
+        include=["documents", "metadatas", "distances"],
     )
-    output = []
-    for i in range(len(results["ids"][0])):
-        output.append({
-            "id":       results["ids"][0][i],
-            "title":    results["metadatas"][0][i]["title"],
-            "type":     results["metadatas"][0][i]["type"],
-            "content":  results["documents"][0][i],
-            "distance": round(results["distances"][0][i], 4),
-        })
-    return output
 
+    docs      = results["documents"][0]
+    metadatas = results["metadatas"][0]
+    distances = results["distances"][0]
+
+    filtered = [
+        {
+            "id":       m.get("id", "unknown"),
+            "title":    m.get("title", ""),
+            "type":     m.get("type", ""),
+            "content":  d,
+            "distance": round(dist, 4),
+        }
+        for d, m, dist in zip(docs, metadatas, distances)
+        if dist < threshold
+    ]
+
+    # Always return at least 1 chunk (the closest one)
+    if not filtered and docs:
+        filtered = [{
+            "id":       metadatas[0].get("id", "unknown"),
+            "title":    metadatas[0].get("title", ""),
+            "type":     metadatas[0].get("type", ""),
+            "content":  docs[0],
+            "distance": round(distances[0], 4),
+        }]
+
+    return filtered
+
+
+# ─────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    build_index()
+    print("=" * 60)
+    print("Building scheduling knowledge base")
+    print("=" * 60)
+    collection = build_knowledge_base()
+
+    print("\n" + "=" * 60)
+    print("Smoke tests")
+    print("=" * 60)
+
+    tests = [
+        ("Why was J1 assigned to M1?",           "diagnostic"),
+        ("Does this schedule look risky?",        "risk_assessment"),
+        ("Which workers are available today?",    "availability"),
+        ("What does makespan mean?",              "general"),
+        ("What happens if J1 runs over?",         "general"),
+        ("Why is there no buffer between jobs?",  "diagnostic"),
+    ]
+
+    for query, intent in tests:
+        chunks = search_knowledge(query, intent=intent)
+        print(f"\nQ ({intent}): {query}")
+        for c in chunks:
+            print(f"  → [{c['type']:25s}] {c['id']:35s} dist={c['distance']}")
+
+    print("\n" + "=" * 60)
+    print("Knowledge base ready.")
+    print("=" * 60)
