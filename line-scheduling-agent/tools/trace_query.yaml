@@ -9,7 +9,7 @@ info:
     point for all scheduling questions — it replaces calling individual
     tools directly.
 servers:
-  - url: https://oregon-owners-rehab-bradford.trycloudflare.com
+  - url: https://cameras-sense-preservation-mysql.trycloudflare.com
 paths:
   /trace_query:
     get:

@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knowledge Base Manager — Line Scheduling XAI</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, Arial, sans-serif;
+      font-size: 14px;
+      background: #F5F5F5;
+      color: #1a1a1a;
+      min-height: 100vh;
+    }
+
+    /* ── Layout ── */
+    .page-header {
+      background: #1F4E79;
+      color: white;
+      padding: 20px 32px;
+    }
+    .page-header h1 { font-size: 20px; font-weight: 600; }
+    .page-header p  { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+
+    .container { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+
+    .card {
+      background: white;
+      border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+      padding: 20px 24px;
+      margin-bottom: 20px;
+    }
+    .card h2 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #1F4E79;
+      margin-bottom: 6px;
+    }
+    .card .desc {
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .stat { display: flex; flex-direction: column; }
+    .stat .label { font-size: 11px; color: #777; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat .value { font-size: 18px; font-weight: 700; color: #1F4E79; }
+    .concepts-badge {
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    .concepts-badge.enabled  { background: #E8F5E9; color: #2E7D32; }
+    .concepts-badge.disabled { background: #FFEBEE; color: #C62828; }
+
+    .refresh-btn {
+      margin-left: auto;
+      background: none;
+      border: 1px solid #2E75B6;
+      color: #2E75B6;
+      padding: 6px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.15s;
+    }
+    .refresh-btn:hover { background: #D5E8F0; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 18px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: opacity 0.15s, background 0.15s;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary   { background: #2E75B6; color: white; }
+    .btn-primary:hover:not(:disabled)   { background: #1F4E79; }
+    .btn-danger    { background: #C62828; color: white; }
+    .btn-danger:hover:not(:disabled)    { background: #8B0000; }
+    .btn-secondary { background: #eee; color: #333; }
+    .btn-secondary:hover:not(:disabled) { background: #ddd; }
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    /* ── Feedback messages ── */
+    .feedback {
+      margin-top: 10px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      display: none;
+    }
+    .feedback.success { background: #E8F5E9; color: #2E7D32; display: block; }
+    .feedback.error   { background: #FFEBEE; color: #C62828; display: block; }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: none;
+      width: 16px; height: 16px;
+      border: 2px solid #ccc;
+      border-top-color: #2E75B6;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Drop zone ── */
+    .drop-zone {
+      border: 2px dashed #aaa;
+      border-radius: 6px;
+      padding: 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      background: #fafafa;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: #2E75B6;
+      background: #D5E8F0;
+    }
+    .drop-zone .dz-icon { font-size: 32px; margin-bottom: 8px; }
+    .drop-zone .dz-main { font-size: 15px; font-weight: 500; color: #333; }
+    .drop-zone .dz-sub  { font-size: 12px; color: #888; margin-top: 4px; }
+
+    #file-input { display: none; }
+
+    /* ── File queue ── */
+    #file-queue { margin-top: 14px; }
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: #f0f4f8;
+      border-radius: 4px;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    .file-item .fname { flex: 1; font-weight: 500; }
+    .file-item .fsize { color: #777; font-size: 12px; }
+    .file-item .fstatus { font-size: 12px; }
+    .file-item .fstatus.ok  { color: #2E7D32; }
+    .file-item .fstatus.err { color: #C62828; }
+
+    /* ── Document table ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      text-align: left;
+      padding: 8px 10px;
+      background: #1F4E79;
+      color: white;
+      font-weight: 600;
+    }
+    td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f7f9fc; }
+
+    .sub-header td {
+      background: #D5E8F0;
+      color: #1F4E79;
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 6px 10px;
+    }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+    .badge-pdf     { background: #FFF3E0; color: #E65100; }
+    .badge-csv     { background: #E8F5E9; color: #2E7D32; }
+    .badge-txt     { background: #F3E5F5; color: #6A1B9A; }
+    .badge-concept { background: #D5E8F0; color: #1F4E79; }
+
+    .empty-row td { text-align: center; color: #aaa; padding: 20px; font-style: italic; }
+
+    /* ── Delete inline error ── */
+    .del-error { color: #C62828; font-size: 12px; margin-left: 8px; }
+  </style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Knowledge Base Manager</h1>
+  <p>Line Scheduling XAI System</p>
+</div>
+
+<div class="container">
+
+  <!-- ── SECTION 1: STATUS BAR ── -->
+  <div class="card">
+    <h2>Status</h2>
+    <div class="status-bar">
+      <div class="stat">
+        <span class="label">Documents</span>
+        <span class="value" id="stat-docs">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">Chunks</span>
+        <span class="value" id="stat-chunks">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">Concepts</span>
+        <span id="concepts-badge" class="concepts-badge">—</span>
+      </div>
+      <button class="refresh-btn" onclick="loadStatus()">↻ Refresh</button>
+    </div>
+  </div>
+
+  <!-- ── SECTION 2: CONCEPTS TOGGLE ── -->
+  <div class="card">
+    <h2>Built-in Concept Documents (13 documents)</h2>
+    <p class="desc">
+      Timeless domain knowledge: constraint definitions, risk thresholds,
+      scheduling concepts, and system scope. These documents are independent
+      of any solver run.
+    </p>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-enable" onclick="toggleConcepts('enable')">
+        <span class="spinner" id="spin-enable"></span>
+        Enable Concepts
+      </button>
+      <button class="btn btn-danger" id="btn-disable" onclick="toggleConcepts('disable')">
+        <span class="spinner" id="spin-disable"></span>
+        Disable Concepts
+      </button>
+    </div>
+    <div class="feedback" id="concepts-feedback"></div>
+  </div>
+
+  <!-- ── SECTION 3: UPLOAD AREA ── -->
+  <div class="card">
+    <h2>Upload Documents</h2>
+    <p class="desc">Supported formats: PDF, CSV, TXT</p>
+
+    <div class="drop-zone" id="drop-zone"
+         onclick="document.getElementById('file-input').click()"
+         ondragover="onDragOver(event)"
+         ondragleave="onDragLeave(event)"
+         ondrop="onDrop(event)">
+      <div class="dz-icon">📂</div>
+      <div class="dz-main">Drag and drop PDF, CSV, or TXT files here</div>
+      <div class="dz-sub">or click to browse</div>
+    </div>
+    <input type="file" id="file-input" accept=".pdf,.csv,.txt" multiple
+           onchange="onFileSelect(event)" />
+
+    <div id="file-queue"></div>
+
+    <div style="margin-top:12px;" id="upload-btn-row" style="display:none">
+      <button class="btn btn-primary" id="btn-upload" onclick="uploadAll()" style="display:none">
+        <span class="spinner" id="spin-upload"></span>
+        Upload All
+      </button>
+    </div>
+  </div>
+
+  <!-- ── SECTION 4: DOCUMENT LIST ── -->
+  <div class="card">
+    <h2>Indexed Documents</h2>
+    <table id="doc-table">
+      <thead>
+        <tr>
+          <th>Filename</th>
+          <th>Type</th>
+          <th>Chunks</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="doc-tbody">
+        <tr class="empty-row"><td colspan="4">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+// ── State ──────────────────────────────────────────────────────
+let pendingFiles = [];
+
+// ── On load ────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', loadStatus);
+
+// ── Status / document list ─────────────────────────────────────
+async function loadStatus() {
+  try {
+    const res  = await fetch('/kb/documents');
+    const data = await res.json();
+    document.getElementById('stat-docs').textContent   = data.total_documents;
+    document.getElementById('stat-chunks').textContent = data.total_chunks;
+
+    const badge = document.getElementById('concepts-badge');
+    if (data.concepts_enabled) {
+      badge.textContent  = 'ENABLED';
+      badge.className    = 'concepts-badge enabled';
+    } else {
+      badge.textContent  = 'DISABLED';
+      badge.className    = 'concepts-badge disabled';
+    }
+
+    renderDocTable(data.documents);
+  } catch (e) {
+    console.error('loadStatus error:', e);
+  }
+}
+
+function renderDocTable(docs) {
+  const tbody = document.getElementById('doc-tbody');
+  tbody.innerHTML = '';
+
+  if (!docs || docs.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No documents indexed.</td></tr>';
+    return;
+  }
+
+  const concepts  = docs.filter(d => d.source_type === 'concept');
+  const uploaded  = docs.filter(d => d.source_type !== 'concept');
+
+  if (concepts.length > 0) {
+    const hdr = document.createElement('tr');
+    hdr.className = 'sub-header';
+    hdr.innerHTML = '<td colspan="4">Built-in Concepts</td>';
+    tbody.appendChild(hdr);
+    concepts.forEach(d => tbody.appendChild(makeRow(d)));
+  }
+
+  if (uploaded.length > 0) {
+    const hdr = document.createElement('tr');
+    hdr.className = 'sub-header';
+    hdr.innerHTML = '<td colspan="4">Uploaded Documents</td>';
+    tbody.appendChild(hdr);
+    uploaded.forEach(d => tbody.appendChild(makeRow(d)));
+  }
+}
+
+function makeRow(doc) {
+  const tr = document.createElement('tr');
+  tr.id = 'row-' + CSS.escape(doc.filename);
+
+  const typeLabel = doc.source_type.toUpperCase();
+  const badgeClass = {
+    pdf: 'badge-pdf', csv: 'badge-csv',
+    txt: 'badge-txt', concept: 'badge-concept'
+  }[doc.source_type] || 'badge-concept';
+
+  tr.innerHTML = `
+    <td>${escHtml(doc.filename)}</td>
+    <td><span class="badge ${badgeClass}">${typeLabel}</span></td>
+    <td>${doc.chunk_count}</td>
+    <td>
+      <button class="btn btn-danger" style="padding:4px 10px;font-size:12px"
+              onclick="deleteDoc('${escHtml(doc.filename)}', this)">Delete</button>
+      <span class="del-error" id="del-err-${CSS.escape(doc.filename)}"></span>
+    </td>`;
+  return tr;
+}
+
+// ── Concepts toggle ────────────────────────────────────────────
+async function toggleConcepts(action) {
+  const fb      = document.getElementById('concepts-feedback');
+  const spinId  = action === 'enable' ? 'spin-enable' : 'spin-disable';
+  const btnId   = action === 'enable' ? 'btn-enable'  : 'btn-disable';
+
+  fb.className = 'feedback';
+  fb.textContent = '';
+  document.getElementById(spinId).style.display = 'inline-block';
+  document.getElementById(btnId).disabled = true;
+
+  try {
+    const res  = await fetch(`/kb/concepts/${action}`, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      const n = action === 'enable' ? data.chunks_indexed : data.chunks_removed;
+      fb.className   = 'feedback success';
+      fb.textContent = action === 'enable'
+        ? `✓ Concepts enabled — ${n} chunks indexed.`
+        : `✓ Concepts disabled — ${n} chunks removed.`;
+    } else {
+      fb.className   = 'feedback error';
+      fb.textContent = `Error: ${data.error || JSON.stringify(data)}`;
+    }
+  } catch (e) {
+    fb.className   = 'feedback error';
+    fb.textContent = `Network error: ${e.message}`;
+  } finally {
+    document.getElementById(spinId).style.display = 'none';
+    document.getElementById(btnId).disabled = false;
+    loadStatus();
+  }
+}
+
+// ── Drag and drop ──────────────────────────────────────────────
+function onDragOver(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.add('dragover');
+}
+function onDragLeave(e) {
+  document.getElementById('drop-zone').classList.remove('dragover');
+}
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('dragover');
+  addFiles(Array.from(e.dataTransfer.files));
+}
+function onFileSelect(e) {
+  addFiles(Array.from(e.target.files));
+  e.target.value = '';
+}
+
+function addFiles(files) {
+  const allowed = ['pdf', 'csv', 'txt'];
+  files.forEach(f => {
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (!allowed.includes(ext)) return;
+    if (pendingFiles.find(p => p.file.name === f.name)) return;
+    pendingFiles.push({ file: f, status: 'pending' });
+  });
+  renderQueue();
+}
+
+function renderQueue() {
+  const queue = document.getElementById('file-queue');
+  const uploadBtn = document.getElementById('btn-upload');
+  queue.innerHTML = '';
+
+  if (pendingFiles.length === 0) {
+    uploadBtn.style.display = 'none';
+    return;
+  }
+
+  pendingFiles.forEach((item, idx) => {
+    const div = document.createElement('div');
+    div.className = 'file-item';
+    const size = (item.file.size / 1024).toFixed(1) + ' KB';
+    let statusHtml = '';
+    if (item.status === 'uploading') statusHtml = '<span class="fstatus">Uploading…</span>';
+    else if (item.status === 'done')  statusHtml = `<span class="fstatus ok">✓ ${item.msg}</span>`;
+    else if (item.status === 'error') statusHtml = `<span class="fstatus err">✗ ${item.msg}</span>`;
+
+    div.innerHTML = `
+      <span class="fname">${escHtml(item.file.name)}</span>
+      <span class="fsize">${size}</span>
+      ${statusHtml}`;
+    queue.appendChild(div);
+  });
+
+  const hasPending = pendingFiles.some(p => p.status === 'pending');
+  uploadBtn.style.display = hasPending ? 'inline-flex' : 'none';
+}
+
+async function uploadAll() {
+  const btn  = document.getElementById('btn-upload');
+  const spin = document.getElementById('spin-upload');
+  btn.disabled = true;
+  spin.style.display = 'inline-block';
+
+  for (let i = 0; i < pendingFiles.length; i++) {
+    const item = pendingFiles[i];
+    if (item.status !== 'pending') continue;
+
+    item.status = 'uploading';
+    renderQueue();
+
+    const fd = new FormData();
+    fd.append('file', item.file);
+
+    try {
+      const res  = await fetch('/kb/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (res.ok) {
+        item.status = 'done';
+        item.msg    = `Indexed ${data.chunks_added} chunks`;
+      } else {
+        item.status = 'error';
+        item.msg    = data.error || 'Upload failed';
+      }
+    } catch (e) {
+      item.status = 'error';
+      item.msg    = e.message;
+    }
+    renderQueue();
+  }
+
+  spin.style.display = 'none';
+  btn.disabled = false;
+
+  // Clear completed items after a moment
+  setTimeout(() => {
+    pendingFiles = pendingFiles.filter(p => p.status === 'pending');
+    renderQueue();
+    loadStatus();
+  }, 2000);
+}
+
+// ── Delete document ────────────────────────────────────────────
+async function deleteDoc(filename, btn) {
+  if (!confirm(`Delete "${filename}"? This cannot be undone.`)) return;
+
+  btn.disabled = true;
+  const errEl = document.getElementById('del-err-' + CSS.escape(filename));
+  if (errEl) errEl.textContent = '';
+
+  try {
+    const res  = await fetch(`/kb/document?filename=${encodeURIComponent(filename)}`,
+                             { method: 'DELETE' });
+    const data = await res.json();
+    if (res.ok) {
+      const row = document.getElementById('row-' + CSS.escape(filename));
+      if (row) row.remove();
+      loadStatus();
+    } else {
+      if (errEl) errEl.textContent = data.error || 'Delete failed';
+      btn.disabled = false;
+    }
+  } catch (e) {
+    if (errEl) errEl.textContent = e.message;
+    btn.disabled = false;
+  }
+}
+
+// ── Utility ────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>

@@ -26,8 +26,9 @@ import sys
 import json
 import time
 import uuid
-from flask import Flask, request, jsonify
-from knowledge_base import search_knowledge
+from flask import Flask, request, jsonify, render_template
+from knowledge_base import search_knowledge, get_collection
+import kb_manager
 
 # ── Langfuse observability (optional — degrades gracefully if unavailable) ──
 _langfuse_enabled = False
@@ -824,6 +825,137 @@ def trace_query():
         "trace_readable":    "\n".join(trace_lines),
         "assembled_context": assembled_context,
         "langfuse_trace_id": lf_trace_id if _langfuse_enabled else None,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────
+# KB WEB UI
+# ─────────────────────────────────────────────────────────────────
+
+@app.route("/kb")
+def kb_ui():
+    return render_template("kb_manager.html")
+
+
+# ─────────────────────────────────────────────────────────────────
+# KB API — GET /kb/documents
+# ─────────────────────────────────────────────────────────────────
+
+@app.route("/kb/documents", methods=["GET"])
+def kb_list_documents():
+    """Returns the current state of the knowledge base."""
+    collection = get_collection()
+    docs       = kb_manager.list_documents(collection)
+    return jsonify({
+        "total_documents":  len(docs),
+        "total_chunks":     sum(d["chunk_count"] for d in docs),
+        "concepts_enabled": kb_manager.concepts_are_enabled(collection),
+        "documents":        docs,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────
+# KB API — POST /kb/upload
+# ─────────────────────────────────────────────────────────────────
+
+@app.route("/kb/upload", methods=["POST"])
+def kb_upload():
+    """Accepts a multipart file upload, parses and indexes it."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file     = request.files["file"]
+    filename = file.filename
+    if not filename:
+        return jsonify({"error": "Empty filename"}), 400
+
+    ext = filename.rsplit(".", 1)[-1].lower()
+    if ext not in ("pdf", "csv", "txt"):
+        return jsonify({
+            "error": f"Unsupported file type: {ext}. Supported: pdf, csv, txt"
+        }), 400
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
+        file.save(tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        if ext == "pdf":
+            chunks = kb_manager.parse_pdf(tmp_path)
+        elif ext == "csv":
+            chunks = kb_manager.parse_csv(tmp_path)
+        else:
+            chunks = kb_manager.parse_txt(tmp_path)
+
+        collection = get_collection()
+        ids = kb_manager.index_document(filename, chunks, ext, collection)
+
+        return jsonify({
+            "status":       "indexed",
+            "filename":     filename,
+            "chunks_added": len(ids),
+            "chunk_ids":    ids,
+        })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 422
+    finally:
+        os.unlink(tmp_path)
+
+
+# ─────────────────────────────────────────────────────────────────
+# KB API — DELETE /kb/document
+# ─────────────────────────────────────────────────────────────────
+
+@app.route("/kb/document", methods=["DELETE"])
+def kb_delete_document():
+    """Deletes all chunks for a given filename."""
+    filename_stem = request.args.get("filename")
+    if not filename_stem:
+        return jsonify({"error": "filename query parameter required"}), 400
+
+    collection    = get_collection()
+    deleted_count = kb_manager.delete_document(filename_stem, collection)
+
+    if deleted_count == 0:
+        return jsonify({
+            "error": f"No document found with filename '{filename_stem}'"
+        }), 404
+
+    return jsonify({
+        "status":         "deleted",
+        "filename":       filename_stem,
+        "chunks_removed": deleted_count,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────
+# KB API — POST /kb/concepts/enable
+# ─────────────────────────────────────────────────────────────────
+
+@app.route("/kb/concepts/enable", methods=["POST"])
+def kb_enable_concepts():
+    """Re-indexes the 13 built-in concept documents."""
+    collection    = get_collection()
+    indexed_count = kb_manager.enable_concepts(collection)
+    return jsonify({
+        "status":         "enabled",
+        "chunks_indexed": indexed_count,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────
+# KB API — POST /kb/concepts/disable
+# ─────────────────────────────────────────────────────────────────
+
+@app.route("/kb/concepts/disable", methods=["POST"])
+def kb_disable_concepts():
+    """Removes all concept documents from the collection."""
+    collection    = get_collection()
+    removed_count = kb_manager.disable_concepts(collection)
+    return jsonify({
+        "status":         "disabled",
+        "chunks_removed": removed_count,
     })
 
 

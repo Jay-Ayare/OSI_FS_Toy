@@ -431,11 +431,26 @@ DOCUMENTS = [
 # BUILD THE COLLECTION
 # ─────────────────────────────────────────────────────────────────
 
-def build_knowledge_base():
+def build_knowledge_base(force_rebuild: bool = False):
     """
-    Drops and rebuilds the ChromaDB collection from the
-    DOCUMENTS list. Call this whenever documents are updated.
+    Builds the ChromaDB collection from the DOCUMENTS list.
+
+    If force_rebuild=True: drops the existing collection and rebuilds.
+    If force_rebuild=False: checks if the collection already has
+    documents and skips the rebuild if so.
     """
+    if not force_rebuild:
+        try:
+            existing = client.get_collection(name=COLLECTION_NAME, embedding_function=ef)
+            count = existing.count()
+            if count > 0:
+                print(f"Collection exists with {count} documents, skipping rebuild.")
+                print("Run with --rebuild to force a full rebuild.")
+                return existing
+        except Exception:
+            pass  # Collection doesn't exist yet — fall through to build
+
+    # Drop and rebuild
     try:
         client.delete_collection(COLLECTION_NAME)
         print(f"Dropped existing collection: {COLLECTION_NAME}")
@@ -470,8 +485,20 @@ def build_knowledge_base():
 # ─────────────────────────────────────────────────────────────────
 
 def get_collection():
-    """Returns the existing collection or raises if not built."""
-    return client.get_collection(name=COLLECTION_NAME, embedding_function=ef)
+    """
+    Returns the existing collection, or creates an empty one if it
+    doesn't exist yet. This allows the system to start cleanly on a
+    fresh machine without requiring python knowledge_base.py first.
+    """
+    try:
+        return client.get_collection(name=COLLECTION_NAME, embedding_function=ef)
+    except Exception:
+        # Collection does not exist — create empty
+        return client.create_collection(
+            name=COLLECTION_NAME,
+            embedding_function=ef,
+            metadata={"hnsw:space": "cosine"},
+        )
 
 
 def search_knowledge(query, intent="default", n_results=None):
@@ -504,9 +531,9 @@ def search_knowledge(query, intent="default", n_results=None):
         )
         return [
             {
-                "id":       m.get("id", "unknown"),
-                "title":    m.get("title", ""),
-                "type":     m.get("type", ""),
+                "id":       m.get("id") or m.get("source_file", "unknown"),
+                "title":    m.get("title") or m.get("source_file", ""),
+                "type":     m.get("source_type") or m.get("type", ""),
                 "content":  d,
                 "distance": round(dist, 4),
             }
@@ -532,27 +559,24 @@ def search_knowledge(query, intent="default", n_results=None):
     metadatas = results["metadatas"][0]
     distances = results["distances"][0]
 
-    filtered = [
-        {
-            "id":       m.get("id", "unknown"),
-            "title":    m.get("title", ""),
-            "type":     m.get("type", ""),
+    def _fmt(m, d, dist):
+        return {
+            "id":       m.get("id") or m.get("source_file", "unknown"),
+            "title":    m.get("title") or m.get("source_file", ""),
+            "type":     m.get("source_type") or m.get("type", ""),
             "content":  d,
             "distance": round(dist, 4),
         }
+
+    filtered = [
+        _fmt(m, d, dist)
         for d, m, dist in zip(docs, metadatas, distances)
         if dist < threshold
     ]
 
     # Always return at least 1 chunk (the closest one)
     if not filtered and docs:
-        filtered = [{
-            "id":       metadatas[0].get("id", "unknown"),
-            "title":    metadatas[0].get("title", ""),
-            "type":     metadatas[0].get("type", ""),
-            "content":  docs[0],
-            "distance": round(distances[0], 4),
-        }]
+        filtered = [_fmt(metadatas[0], docs[0], distances[0])]
 
     return filtered
 
@@ -562,10 +586,15 @@ def search_knowledge(query, intent="default", n_results=None):
 # ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import sys
+    force = "--rebuild" in sys.argv
+
     print("=" * 60)
     print("Building scheduling knowledge base")
+    if force:
+        print("Mode: FORCE REBUILD (--rebuild flag set)")
     print("=" * 60)
-    collection = build_knowledge_base()
+    collection = build_knowledge_base(force_rebuild=force)
 
     print("\n" + "=" * 60)
     print("Smoke tests")
